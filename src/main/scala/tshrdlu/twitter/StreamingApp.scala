@@ -17,13 +17,15 @@ package tshrdlu.twitter
  */
 
 import twitter4j._
+import twitter4j.conf.Configuration
 
 /**
  * Base class that sets reasonable defaults for Configuration
  * and StatusListener and gets a TwitterStream instance set up and
  * ready to use.
  */
-class BaseStreamer extends PrintStatusListener {
+class BaseStreamer()
+extends PrintStatusListener {
   val twitterStream = new TwitterStreamFactory().getInstance
   twitterStream.addListener(this)
 

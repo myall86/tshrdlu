@@ -4,6 +4,11 @@ import twitter4j._
 import tshrdlu.twitter._
 import tshrdlu.util.{English,SimpleTokenizer}
 
+object Dict {
+  // Found the utils later... :-/
+  def fromFile(path: String): Set[String] = {io.Source.fromInputStream(new java.util.zip.GZIPInputStream(new java.io.FileInputStream(path))).getLines.map(_.toLowerCase).toSet}
+}
+
 /**
  * Show only tweets that appear to be English.
  */
@@ -31,10 +36,10 @@ trait EnglishStatusListener extends StatusListenerAdaptor {
   /**
    * Test whether a given text is written in English.
    */
-  val TheRE = """(?i)\bthe\b""".r // Throw me away!
-  def isEnglish(text: String) = {
-    // Remove this and do better.
-    !TheRE.findFirstIn(text).isEmpty
+  lazy val words = Dict.fromFile("src/main/resources/lang/eng/lexicon/words.gz")
+  def isEnglish(text: String): Boolean = {
+    val tokens = text.toLowerCase.split(" ").map(_.filter((('a' to 'z') :+ '\'').toSet)).filter(_.length > 3).filter("^(?:@|#|http)".r.findFirstMatchIn(_).isEmpty)
+                                                                                                                    (tokens.count(words).toFloat / tokens.length) > 0.5 && ! (tokens.length == 0)
   }
 
 }
@@ -70,14 +75,14 @@ object PolarityStatusStreamer extends BaseStreamer with PolarityStatusListener
  * statistics at default interval (every 100 tweets). Filtered by provided
  * query terms.
  */
-object PolarityTermStreamer 
+object PolarityTermStreamer extends FilteredStreamer with PolarityStatusListener with TermFilter
 
 /**
  * Output polarity labels for every English tweet and output polarity
  * statistics at an interval of every ten tweets. Filtered by provided
  * query locations.
  */
-object PolarityLocationStreamer 
+object PolarityLocationStreamer extends FilteredStreamer with PolarityStatusListener with LocationFilter { override val outputInterval = 10 }
 
 
 /**
@@ -102,33 +107,41 @@ trait PolarityStatusListener extends EnglishStatusListener {
     val text = status.getText
     if (isEnglish(text)) {
       val polarityIndex = getPolarity(text)
-      polarityCounts(polarityIndex) += 1
+      val polarityMagic = polarityIndex match {
+        case x if (x > 0) => 0
+        case x if (x < 0) => 1
+        case x if (x == 0) => 2
+      }
+      polarityCounts(polarityMagic) += 1
 
       numEnglishTweets += 1
 
-      println(polaritySymbol(polarityIndex) + ": " + text)
+      println(polaritySymbol(polarityMagic) + ": " + text)
 
       if ((numEnglishTweets % outputInterval) == 0) {
-	println("----------------------------------------")
-	println("Number of English tweets processed: " + numEnglishTweets)
-	println(polaritySymbol.mkString("\t"))
-	println(polarityCounts.mkString("\t"))
-	println(polarityCounts.map(_/numEnglishTweets).map(DecimalToPercent).mkString("\t"))
-	println("----------------------------------------")
+	    println("----------------------------------------")
+	    println("Number of English tweets processed: " + numEnglishTweets)
+	    println(polaritySymbol.mkString("\t"))
+	    println(polarityCounts.mkString("\t"))
+	    println(polarityCounts.map(_/numEnglishTweets).map(DecimalToPercent).mkString("\t"))
+	    println("----------------------------------------")
       }
     }
     
   }
 
+
+  lazy val negativeWords = Dict.fromFile("src/main/resources/lang/eng/lexicon/negative-words.txt.gz")
+  lazy val positiveWords = Dict.fromFile("src/main/resources/lang/eng/lexicon/positive-words.txt.gz")
   /**
    * Given a text, return its polarity:
-   *   0 for positive
-   *   1 for negative
-   *   2 for neutral
+   *   x > 0 for positive
+   *   x < 0 for negative
+   *   0 for neutral
    */
-  val random = new scala.util.Random
   def getPolarity(text: String) = {
-    random.nextInt(3)
+    val tokens = text.toLowerCase.split(" ")
+    tokens.count(positiveWords) compare tokens.count(negativeWords)
   }
 
 }

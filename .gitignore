@@ -6,3 +6,4 @@ target/
 .ensime*
 *~
 twitter4j.properties
+local.sbt

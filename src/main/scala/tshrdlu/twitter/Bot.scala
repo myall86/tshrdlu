@@ -118,7 +118,7 @@ class Replier extends Actor {
 }
 
 class Collector extends Actor {
-  var collected = scala.collection.mutable.ListBuffer[Status]()
+  val collected = scala.collection.mutable.ListBuffer[Status]()
   def receive = {
     case tweet: Status => {
       collected.append(tweet)

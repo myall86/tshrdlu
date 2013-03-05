@@ -72,7 +72,7 @@ object English extends Language("eng") {
   }
 
   def removeNonLanguage(text: String) =
-    text.replaceAll("[@#][A-Za-z_]+","")
+    text.replaceAll("@[A-Za-z_]+","")
       .replaceAll("""http[^\s]+""","")
       .replaceAll("\\s+"," ")
 

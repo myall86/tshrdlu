@@ -24,6 +24,8 @@ import akka.event.Logging
 import scala.concurrent.duration._
 import akka.util.Timeout
 
+import tshrdlu.Lucene
+
 /**
  * Base trait with properties default for Configuration.
  * Gets a Twitter instance set up and ready to use.
@@ -134,6 +136,21 @@ class LuceneWriter extends Actor {
   def receive = {
     case batch: List[Status] => {
       // TODO: Filter & write to lucene
+	// Pull the RT and mentions from the front of a tweet.
+  	lazy val StripMentionsRE = """(?:)(?:RT\s)?(?:(?:@[A-Za-z\d_]+\s))+(.*)$""".r
+	 val useableTweets = batch
+      .map(_.getText)
+      .map {
+	case StripMentionsRE(rest) => rest
+	case x => x
+      }
+      .filterNot(_.contains('@'))
+      .filterNot(_.contains('/'))
+      .filter(tshrdlu.util.English.isEnglish)
+      .filter(tshrdlu.util.English.isSafe)
+	
+	Lucene.write(useableTweets.toIterable)
+	println(Lucene.writer.maxDoc)
     }
   }
 }

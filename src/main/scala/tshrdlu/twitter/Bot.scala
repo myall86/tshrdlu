@@ -51,45 +51,37 @@ case class UserListMemberDeletion(deletedMember: User, listOwner: User, list: Us
 case class UserListSubscription(subscriber: User, listOwner: User, list: UserList)
 case class UserListUnsubscription(subscriber: User, listOwner: User, list: UserList)
 case class UserListUpdate(listOwner: User, list: UserList)
-
+case class ProfileUpdate(user: User)
 
 // Streaming the statuses to the actors.
 class Streamer(actor: ActorRef) extends StreamInstance {
-  stream.addListener(new StatusListener() {
+  class Listener extends UserStreamListener {
+    // StatusListener
     def onStatus(status: Status) = actor ! status
     def onDeletionNotice(notice: StatusDeletionNotice) = actor ! notice
     def onScrubGeo(userId: Long, upToStatusId: Long) = actor ! ScrubGeo(userId, upToStatusId)
     def onStallWarning(warning: StallWarning) = actor ! warning
     def onTrackLimitationNotice(int: Int) = actor ! TrackLimitationNotice(int)
     def onException(ex: Exception) = actor ! akka.actor.Status.Failure(ex)
-  })
-
-	stream.addListener(new UserStreamListener()
-	{
-		def onStatus(status: Status) = actor ! status
-    def onDeletionNotice(notice: StatusDeletionNotice) = actor ! notice
-    def onScrubGeo(userId: Long, upToStatusId: Long) = actor ! ScrubGeo(userId, upToStatusId)
-    def onStallWarning(warning: StallWarning) = actor ! warning
-    def onTrackLimitationNotice(int: Int) = actor ! TrackLimitationNotice(int)
-    def onException(ex: Exception) = actor ! akka.actor.Status.Failure(ex)
-
-		def onBlock(source: User, blockedUser: User) = actor ! Block(source, blockedUser)
-  def onDeletionNotice(directMessageId: Long, userId: Long) = actor ! DeletionNotice(directMessageId, userId)
-  def onDirectMessage(directMessage: DirectMessage) = actor ! directMessage
-  def onFavorite(source: User, target: User, favoritedStatus: Status) = actor ! Favorite(source, target, favoritedStatus)
-  def onFollow(source: User, followedUser: User) = actor ! Follow(source, followedUser)
-  def onFriendList(friendIds: Array[Long]) = actor ! friendIds
-  def onUnblock(source: User, unblockedUser: User) = actor ! Unblock(source: User, unblockedUser: User)
-  def onUnfavorite(source: User, target: User, unfavoritedStatus: Status) = actor ! Unfavorite(source, target, unfavoritedStatus)
-  def onUserListCreation(listOwner: User, list: UserList) = actor ! UserListCreation(listOwner, list)
-  def onUserListDeletion(listOwner: User, list: UserList) = actor ! UserListDeletion(listOwner, list)
-  def onUserListMemberAddition(addedMember: User, listOwner: User, list: UserList) = actor ! UserListMemberAddition(addedMember, listOwner, list)
-  def onUserListMemberDeletion(deletedMember: User, listOwner: User, list: UserList) = actor ! UserListMemberDeletion(deletedMember, listOwner, list)
-  def onUserListSubscription(subscriber: User, listOwner: User, list: UserList) = actor ! UserListSubscription(subscriber, listOwner, list)
-  def onUserListUnsubscription(subscriber: User, listOwner: User, list: UserList) = actor ! UserListUnsubscription(subscriber, listOwner, list)
-  def onUserListUpdate(listOwner: User, list: UserList) = actor ! UserListUpdate(listOwner, list)
-  def onUserProfileUpdate(updatedUser: User) = actor ! updatedUser
-	})
+    // UserStreamListener
+    def onBlock(source: User, blockedUser: User) = actor ! Block(source, blockedUser)
+    def onDeletionNotice(directMessageId: Long, userId: Long) = actor ! DeletionNotice(directMessageId, userId)
+    def onDirectMessage(directMessage: DirectMessage) = actor ! directMessage
+    def onFavorite(source: User, target: User, favoritedStatus: Status) = actor ! Favorite(source, target, favoritedStatus)
+    def onFollow(source: User, followedUser: User) = actor ! Follow(source, followedUser)
+    def onFriendList(friendIds: Array[Long]) = actor ! friendIds
+    def onUnblock(source: User, unblockedUser: User) = actor ! Unblock(source: User, unblockedUser: User)
+    def onUnfavorite(source: User, target: User, unfavoritedStatus: Status) = actor ! Unfavorite(source, target, unfavoritedStatus)
+    def onUserListCreation(listOwner: User, list: UserList) = actor ! UserListCreation(listOwner, list)
+    def onUserListDeletion(listOwner: User, list: UserList) = actor ! UserListDeletion(listOwner, list)
+    def onUserListMemberAddition(addedMember: User, listOwner: User, list: UserList) = actor ! UserListMemberAddition(addedMember, listOwner, list)
+    def onUserListMemberDeletion(deletedMember: User, listOwner: User, list: UserList) = actor ! UserListMemberDeletion(deletedMember, listOwner, list)
+    def onUserListSubscription(subscriber: User, listOwner: User, list: UserList) = actor ! UserListSubscription(subscriber, listOwner, list)
+    def onUserListUnsubscription(subscriber: User, listOwner: User, list: UserList) = actor ! UserListUnsubscription(subscriber, listOwner, list)
+    def onUserListUpdate(listOwner: User, list: UserList) = actor ! UserListUpdate(listOwner, list)
+    def onUserProfileUpdate(updatedUser: User) = actor ! ProfileUpdate(updatedUser)
+  }
+  stream.addListener(new Listener)
 }
 
 /**

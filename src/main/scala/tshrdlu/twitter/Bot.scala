@@ -225,16 +225,16 @@ class LuceneWriter extends Actor {
 	 val useableTweets = batch
       .map(_.getText)
       .map {
-	case StripMentionsRE(rest) => rest
-	case x => x
+        case StripMentionsRE(rest) => rest
+        case x => x
       }
       .filterNot(_.contains('@'))
       .filterNot(_.contains('/'))
       .filter(tshrdlu.util.English.isEnglish)
       .filter(tshrdlu.util.English.isSafe)
 	
-	Lucene.write(useableTweets.toIterable)
-	println(Lucene.writer.maxDoc)
+      Lucene.write(useableTweets.toIterable)
+      println(Lucene.writer.maxDoc)
     }
   }
 }

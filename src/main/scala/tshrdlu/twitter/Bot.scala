@@ -216,8 +216,8 @@ class Collector extends Actor {
 }
 
 class LuceneWriter extends Actor {
-	// Pull the RT and mentions from the front of a tweet.
-	lazy val StripMentionsRE = """(?:)(?:RT\s)?(?:(?:@[A-Za-z\d_]+\s))+(.*)$""".r
+  // Pull the RT and mentions from the front of a tweet.
+  lazy val StripMentionsRE = """(?:)(?:RT\s)?(?:(?:@[A-Za-z\d_]+\s))+(.*)$""".r
 
   def receive = {
     case batch: List[Status] => {

@@ -221,7 +221,6 @@ class LuceneWriter extends Actor {
 
   def receive = {
     case batch: List[Status] => {
-      // TODO: Filter & write to lucene
 	 val useableTweets = batch
       .map(_.getText)
       .map {
@@ -233,7 +232,7 @@ class LuceneWriter extends Actor {
       .filter(tshrdlu.util.English.isEnglish)
       .filter(tshrdlu.util.English.isSafe)
 	
-      Lucene.write(useableTweets.toIterable)
+      Lucene.write(useableTweets)
       println(Lucene.writer.maxDoc)
     }
   }

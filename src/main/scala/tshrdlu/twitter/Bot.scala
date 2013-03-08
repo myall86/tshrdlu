@@ -29,14 +29,6 @@ import tshrdlu.util.{English,SimpleTokenizer}
 import bridge._
 
 /**
- * Base trait with properties default for Configuration.
- * Gets a Twitter instance set up and ready to use.
- */
-trait TwitterInstance {
-  val twitter = new TwitterFactory().getInstance
-}
-
-/**
  * Companion object for ReactiveBot with main method.
  */
 object ReactiveBot {
@@ -51,12 +43,28 @@ object ReactiveBot {
 
     val sample = new Streamer(system.actorOf(Props[Sampler], name = "sampler"))
     sample.stream.sample
-    val reply = new Streamer(system.actorOf(Props[Replier], name = "replier"))
+    val reply = new Streamer(system.actorOf(Props[Receiver], name = "replier"))
     reply.stream.user
 
   }
 }
 
+object FollowAnlp extends TwitterInstance {
+  def main(args: Array[String]) {
+    twitter.getFollowersIDs("appliednlp", -1)
+      .getIDs
+      .filter({id =>
+        val screenName = twitter.showUser(id).getScreenName
+        screenName.endsWith("_anlp") && screenName != twitter.getScreenName})
+      .toSet
+      .foreach(twitter.createFriendship(_:Long))
+  }
+}
+
+// The Sampler collects possible responses. Does not implement a
+// filter for bot requests, so it should be connected to the sample
+// stream. Batches tweets together using the collector so we don't
+// need to add every tweet to the index on its own.
 class Sampler extends Actor {
   var collector, writer: ActorRef = null
 
@@ -71,37 +79,82 @@ class Sampler extends Actor {
   }
 }
 
-class Receiver extends Actor {
-  var replier : ActorRef = null
+/**
+ * Base trait with properties default for Configuration.
+ * Gets a Twitter instance set up and ready to use.
+ */
+trait TwitterInstance {
+  val twitter = new TwitterFactory().getInstance
+  val FollowRE = """(?i)(?<=follow)(\s+(me|@[A-Za-z\d_]+))+""".r
+}
+
+// Holds the reply the bot should send.
+case class Reply(reply: String, status: Status)
+
+// Receives request to the bot and forwards them accordingly. Also
+// sends replies back.
+class Receiver extends Actor with TwitterInstance {
+  var replier, follower : ActorRef = null
 
   override def preStart = {
     replier = context.actorOf(Props[Replier], name="replier")
+    follower = context.actorOf(Props[Follower], name="follower")
   }
-
-  // Recognize a follow command
-  lazy val FollowRE = """(?i)(?<=follow)(\s+(me|@[a-z]+))+""".r
 
   def receive = {
     case status: Status => {
-      val text = status.getText
-      text match {
-        case FollowRE() => {
-          val FollowRE(follow) = text
-          // TODO: Follow code - do we need that one? Given we use
-          // sample.json
+	  val username = twitter.getScreenName
+	  println("New status: " + status.getText)
+      val replyName = status.getInReplyToScreenName
+      if (replyName == username) {
+      	println("*************")
+      	println("New reply: " + status.getText)
+        val text = status.getText
+        text match {
+          case FollowRE() => follower ! status
+          // case ... other behaviour
+          case _ => replier ! status
         }
-        // case ... other behaviour
-        case _ => replier ! status
       }
+    }
+    case Reply(response, status) => {
+      val text = "@" + status.getUser.getScreenName + " " + response
+      println("Replying: " + text)
+      val reply = new StatusUpdate(text).inReplyToStatusId(status.getId)
+      twitter.updateStatus(reply)
+    }
+  }
+
+}
+
+// Processes a follow request.
+class Follower extends Actor with TwitterInstance {
+  def receive = {
+    case status: Status => {
+      val followSet = FollowRE.findAllIn(status.getText)
+	    .next
+	    .drop(1)
+	    .split("\\s")
+	    .map {
+          case "me" => status.getUser.getScreenName
+	      case screenName => screenName.drop(1)
+	    }
+	    .toSet
+
+      followSet.foreach(twitter.createFriendship(_))
+      val reply = "OK. I FOLLOWED " + followSet.map("@" + _).mkString(" ") + "."  
+      sender ! Reply(reply, status)
     }
   }
 }
 
-class Replier extends Actor {
-	val twitter = new TwitterFactory().getInstance
 
-  // Recognize a follow command
-  lazy val FollowRE = """(?i)(?<=follow)(\s+(me|all_appliednlp|@[A-Za-z\d_]+))+""".r
+// The Replier is responsible for responding to messages sent to the
+// Bot. The way it responds is to choose the best tweet retrieved from
+// Lucene database. The query issued is a string of tokens that
+// have at least a length of 3.
+class Replier extends Actor {
+  val twitter = new TwitterFactory().getInstance
 
   // Pull just the lead mention from a tweet.
   lazy val StripLeadMentionRE = """(?:)^@[A-Za-z\d_]+\s(.*)$""".r
@@ -109,71 +162,21 @@ class Replier extends Actor {
   def receive = {
     // If this becomes a bottleneck, create subworkers.
     case status: Status => {
-      // TODO: Reply n stuff.
-	val username = twitter.getScreenName
-	println("New status: " + status.getText)
-    	val replyName = status.getInReplyToScreenName
-    	if (replyName == username) {
-      		println("*************")
-      		println("New reply: " + status.getText)
-      		val text = "@" + status.getUser.getScreenName + " " + doActionGetReply(status)
-      		println("Replying: " + text)
-      		val reply = new StatusUpdate(text).inReplyToStatusId(status.getId)
-      		twitter.updateStatus(reply)
-    	}
+      val text = status.getText.toLowerCase
+	  val StripLeadMentionRE(withoutMention) = text
+	  val query = SimpleTokenizer(withoutMention)
+	    .filter(_.length > 2)
+	    .toList
+	    .mkString(" ")
+      val reply = Lucene.read(query)
+      if (reply.nonEmpty) {sender ! Reply(reply.get, status)}
+      else {println("Found no witty reply :-(")}
     }
   }
-
-   /**
-   * A method that possibly takes an action based on a status
-   * it has received, and then produces a response.
-   */
-  def doActionGetReply(status: Status) = {
-    val text = status.getText.toLowerCase
-    val followMatches = FollowRE.findAllIn(text)
-	if (!followMatches.isEmpty) {
-      		val followSet = followMatches
-				.next
-				.drop(1)
-				.split("\\s")
-				.map {
-	  				case "me" => status.getUser.getScreenName
-					case "all_appliednlp" =>
-	  				{
-						twitter.getFollowersIDs("appliednlp", -1)
-							.getIDs
-							.map(id => twitter.showUser(id).getScreenName)
-							.filter(screenName => screenName.endsWith("_anlp") && screenName != twitter.getScreenName)
-							.mkString(" ")
-	  				}
-	  				case screenName => screenName.drop(1)
-				}
-				.toSet
-      		followSet.foreach(follow =>
-					if (follow.contains("_anlp") && follow.contains(" "))
-						follow.split(" ").foreach(twitter.createFriendship)
-					else twitter.createFriendship(follow)
-				)
-      		"OK. I FOLLOWED " + followSet.map(x => if(x.contains("_anlp") && x.contains(" ")) "all_appliednlp"
-							else "@" + x
-						).mkString(" ") + "."  
-    	} else {
-     		try {
-			val StripLeadMentionRE(withoutMention) = text
-			val query = SimpleTokenizer(withoutMention)
-	    				.filter(_.length > 2)
-	    				.toList
-	    				.mkString(" ")
-			Lucene.read(query)
-      		} catch { 
-			case _: Throwable => "???"
-      		}
-  
-  	}
-  }
-
 }
 
+// Collects until it reaches 100 and then sends them back to the
+// sender and the cycle begins anew.
 class Collector extends Actor {
   val collected = scala.collection.mutable.ListBuffer[Status]()
   def receive = {
@@ -187,6 +190,9 @@ class Collector extends Actor {
   }
 }
 
+// The LuceneWriter actor extracts the content of each tweet, removes
+// the RT and mentions from the front and select only tweets
+// classified as not vulgar for indexing via Lucene.
 class LuceneWriter extends Actor {
   // Pull the RT and mentions from the front of a tweet.
   lazy val StripMentionsRE = """(?:)(?:RT\s)?(?:(?:@[A-Za-z\d_]+\s))+(.*)$""".r
@@ -205,7 +211,6 @@ class LuceneWriter extends Actor {
       .filter(tshrdlu.util.English.isSafe)
 	
       Lucene.write(useableTweets)
-      println(Lucene.writer.maxDoc)
     }
   }
 }

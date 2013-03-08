@@ -10,6 +10,10 @@ import org.apache.lucene.util.Version
 import twitter4j.Status
 import scala.collection.JavaConversions._
 
+// Handles reading and writing to Lucene. We use a specific
+// EnglishAnalyzer which also adds synonyms and other magic. The
+// initial tweets are also stored directly in Lucene. This object is
+// threadsave, but you might find a slightly outdated version.
 object Lucene {
   val index = new RAMDirectory()
   val analyzer = new EnglishAnalyzer(Version.LUCENE_41)
@@ -27,11 +31,11 @@ object Lucene {
     writer.commit()
   }
 
-  def read(query: String): String = {
+  def read(query: String): Option[String] = {
     val reader = DirectoryReader.open(index)
     val searcher = new IndexSearcher(reader)
     val collector = TopScoreDocCollector.create(1, true)
     searcher.search(parser.parse(query), collector)
-    searcher.doc(collector.topDocs().scoreDocs(0).doc).get("text")
+    collector.topDocs().scoreDocs.headOption.map(_.doc).map(searcher.doc(_).get("text"))
   }
 }

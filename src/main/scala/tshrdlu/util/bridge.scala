@@ -4,6 +4,11 @@ import twitter4j._
 import akka.actor._
 import tshrdlu.twitter._
 
+// This file implements a bridge that takes a twitter4j stream and
+// feeds it to Akka. Streamer(actor).stream.user and your actor
+// receives the stream. For the various case classes, consult
+// twitter4j events.
+
 case class ScrubGeo(userId: Long, upToStatusId: Long)
 case class TrackLimitationNotice(numberOfLimitedStatuses: Int)
 

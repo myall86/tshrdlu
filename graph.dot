@@ -1,0 +1,16 @@
+digraph "actors" {
+    "sample stream" -> "Sampler" [label="Status"];
+    "Sampler" -> "Collector" [label="Status"];
+    "Collector" -> "Sampler" [label="List[Status]"];
+    "Sampler" -> "LuceneWriter" [label="List[Status]"];
+    "LuceneWriter" -> "Lucene" [label="List[Status]"];
+    "user stream" -> "Receiver" [label="Status"];
+    "Receiver" -> "Follower" [label="Status"];
+    "Receiver" -> "Replier" [label="Status"];
+    "Replier" -> "Lucene" [label="Query"];
+    "Lucene" -> "Replier" [label="statustext"];
+    "Follower" -> "Receiver" [label="Reply"];
+    "Replier" -> "Receiver" [label="Reply"];
+    { rank=same "sample stream" "user stream" }
+    { rank=sink "Lucene" }
+}

@@ -146,8 +146,10 @@ class Receiver extends Actor {
 }
 
 class Replier extends Actor {
+	val twitter = new TwitterFactory().getInstance
+
   // Recognize a follow command
-  lazy val FollowRE = """(?i)(?<=follow)(\s+(me|@[A-Za-z\d_]+))+""".r
+  lazy val FollowRE = """(?i)(?<=follow)(\s+(me|all_appliednlp|@[A-Za-z\d_]+))+""".r
 
   // Pull just the lead mention from a tweet.
   lazy val StripLeadMentionRE = """(?:)^@[A-Za-z\d_]+\s(.*)$""".r
@@ -156,7 +158,7 @@ class Replier extends Actor {
     // If this becomes a bottleneck, create subworkers.
     case status: Status => {
       // TODO: Reply n stuff.
-	val username = "ckcuong_anlp" // TODO: need to get the real username
+	val username = twitter.getScreenName
 	println("New status: " + status.getText)
     	val replyName = status.getInReplyToScreenName
     	if (replyName == username) {
@@ -165,7 +167,7 @@ class Replier extends Actor {
       		val text = "@" + status.getUser.getScreenName + " " + doActionGetReply(status)
       		println("Replying: " + text)
       		val reply = new StatusUpdate(text).inReplyToStatusId(status.getId)
-//      		twitter.updateStatus(reply)
+      		twitter.updateStatus(reply)
     	}
     }
   }
@@ -177,19 +179,45 @@ class Replier extends Actor {
   def doActionGetReply(status: Status) = {
     val text = status.getText.toLowerCase
     val followMatches = FollowRE.findAllIn(text)
-     try {
-	val StripLeadMentionRE(withoutMention) = text
-	val query = SimpleTokenizer(withoutMention)
-	    .filter(_.length > 2)
-//	    .toSet
-//	    .take(3)
-	    .toList
-	    .mkString(" ")
-	Lucene.read(query)
-      }	catch { 
-	case _: Throwable => "???"
-      }
+	if (!followMatches.isEmpty) {
+      		val followSet = followMatches
+				.next
+				.drop(1)
+				.split("\\s")
+				.map {
+	  				case "me" => status.getUser.getScreenName
+					case "all_appliednlp" =>
+	  				{
+						twitter.getFollowersIDs("appliednlp", -1)
+							.getIDs
+							.map(id => twitter.showUser(id).getScreenName)
+							.filter(screenName => screenName.endsWith("_anlp") && screenName != twitter.getScreenName)
+							.mkString(" ")
+	  				}
+	  				case screenName => screenName.drop(1)
+				}
+				.toSet
+      		followSet.foreach(follow =>
+					if (follow.contains("_anlp") && follow.contains(" "))
+						follow.split(" ").foreach(twitter.createFriendship)
+					else twitter.createFriendship(follow)
+				)
+      		"OK. I FOLLOWED " + followSet.map(x => if(x.contains("_anlp") && x.contains(" ")) "all_appliednlp"
+							else "@" + x
+						).mkString(" ") + "."  
+    	} else {
+     		try {
+			val StripLeadMentionRE(withoutMention) = text
+			val query = SimpleTokenizer(withoutMention)
+	    				.filter(_.length > 2)
+	    				.toList
+	    				.mkString(" ")
+			Lucene.read(query)
+      		} catch { 
+			case _: Throwable => "???"
+      		}
   
+  	}
   }
 
 }

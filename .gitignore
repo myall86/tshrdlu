@@ -5,5 +5,5 @@ target/
 .cache
 .ensime*
 *~
-+*.class
+*.class
 twitter4j.properties

@@ -73,10 +73,10 @@ class Bot extends Actor with ActorLogging {
   val luceneReplier = context.actorOf(Props[LuceneReplier], name = "LuceneReplier")
 
   override def preStart {
-    replierManager ! RegisterReplier(streamReplier)
+/*    replierManager ! RegisterReplier(streamReplier)
     replierManager ! RegisterReplier(synonymReplier)
     replierManager ! RegisterReplier(synonymStreamReplier)
-    replierManager ! RegisterReplier(bigramReplier)
+    replierManager ! RegisterReplier(bigramReplier)*/
     replierManager ! RegisterReplier(luceneReplier)
   }
 

@@ -34,7 +34,7 @@ object Lucene {
   def read(query: String): Seq[String] = {
     val reader = DirectoryReader.open(index)
     val searcher = new IndexSearcher(reader)
-    val collector = TopScoreDocCollector.create(5, true)
+    val collector = TopScoreDocCollector.create(200, true)
     searcher.search(parser.parse(query), collector)
     collector.topDocs().scoreDocs.toSeq.map(_.doc).map(searcher.doc(_).get("text"))
   }

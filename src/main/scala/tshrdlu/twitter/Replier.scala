@@ -9,7 +9,7 @@ import twitter4j._
 trait BaseReplier extends Actor with ActorLogging {
   import Bot._
   import TwitterRegex._
-  import tshrdlu.util.SimpleTokenizer
+  import tshrdlu.util.{LanguageModel, SimpleTokenizer}
 
   import context.dispatcher
   import scala.concurrent.Future
@@ -18,15 +18,57 @@ trait BaseReplier extends Actor with ActorLogging {
   def receive = {
     case ReplyToStatus(status) => 
       val replyName = status.getUser.getScreenName
-      val candidatesFuture = getReplies(status, 138-replyName.length)
+	val maxLength = 138-replyName.length
+      val candidatesFuture = getReplies(status, maxLength)
       candidatesFuture.map { candidates =>
-        val reply = "@" + replyName + " " + candidates.toSet.head
+        val reply = "@" + replyName + " " + createTweetFromBigram(candidates, maxLength)
         log.info("Candidate reply: " + reply)
         new StatusUpdate(reply).inReplyToStatusId(status.getId)
       } pipeTo sender
   }
 
   def getReplies(status: Status, maxLength: Int): Future[Seq[String]]
+
+	def createTweetFromBigram(tweets: Seq[String], maxLength: Int = 140): String =
+	{
+		val BEGIN_BOUNDARY = "[<b>]"
+		val END_BOUNDARY = "[<\\b>]"
+println(tweets.size)
+		val data = tweets.map(tweet => BEGIN_BOUNDARY + " " + Tokenize(tweet).mkString(" ") + " " + END_BOUNDARY)
+			.mkString(" ")
+
+		val bigramProb: Map[String,Map[String,Double]] = 
+      			LanguageModel.createBigramModel(data)
+
+		var text = ""
+		var bigramUsed = Set[String]()
+		var currentToken = BEGIN_BOUNDARY
+
+		while(currentToken != END_BOUNDARY && text.length <= maxLength)
+		{
+			val candidates = bigramProb(currentToken)
+				.filterNot{case (token, prob) => bigramUsed.contains(currentToken + " " + token)}
+				.toSeq
+
+			val nextToken = if (candidates.isEmpty) END_BOUNDARY
+					else candidates.sortBy(_._2).last._1
+
+			if (nextToken != END_BOUNDARY) text += " " + nextToken
+			bigramUsed += (currentToken + " " + nextToken)
+			currentToken = nextToken
+		}
+		text.replaceAll("""\s([\?!()\";\|\[\].,':])\s""", "$1").take(maxLength)
+	}
+
+	def Tokenize(text: String): IndexedSeq[String] =
+	{
+    		val starts = """(?:[#@])|\b(?:http)"""
+   		 text.replaceAll("""([\?!()\";\|\[\].,':])""", " $1 ")
+    			.trim
+    			.split("\\s+")
+    			.toIndexedSeq
+    			.filterNot(x => x.startsWith(starts))
+  	}
 
 }
 
@@ -44,7 +86,7 @@ class SynonymReplier extends BaseReplier {
   def getReplies(status: Status, maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to reply synonym")
     val text = stripLeadMention(status.getText).toLowerCase
-    val synTexts = (0 until 10).map(_ => Future(synonymize(text))) 
+    val synTexts = (0 until 100).map(_ => Future(synonymize(text))) 
     Future.sequence(synTexts).map(_.filter(_.length <= maxLength))
   }
 
@@ -235,17 +277,6 @@ class BigramReplier extends BaseReplier {
     else None
   }
 
-  
-  def Tokenize(text: String): IndexedSeq[String]={
-    val starts = """(?:[#@])|\b(?:http)"""
-    text
-    .replaceAll("""([\?!()\";\|\[\].,':])""", " $1 ")
-    .trim
-    .split("\\s+")
-    .toIndexedSeq
-    .filterNot(x => x.startsWith(starts))
-  }
-
 }
 
 /**
@@ -263,7 +294,7 @@ class LuceneReplier extends BaseReplier {
   import scala.concurrent.Future
 
   def getReplies(status: Status, maxLength: Int = 140): Future[Seq[String]] = {
-    log.info("Trying to do search replies by Lucene")
+    log.info("Trying to do search replies via Lucene")
     val text = status.getText.toLowerCase
 	  val StripLeadMentionRE(withoutMention) = text
 	  val query = SimpleTokenizer(withoutMention)

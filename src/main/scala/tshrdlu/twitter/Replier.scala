@@ -9,17 +9,30 @@ import twitter4j._
 trait BaseReplier extends Actor with ActorLogging {
   import Bot._
   import TwitterRegex._
-  import tshrdlu.util.{LanguageModel, SimpleTokenizer}
+  import tshrdlu.util.{English, LanguageModel, SimpleTokenizer}
 
   import context.dispatcher
   import scala.concurrent.Future
   import akka.pattern.pipe
+  import collection.JavaConversions._
+  import nak.util.CollectionUtil._
 
   def receive = {
     case ReplyToStatus(status) => 
       val replyName = status.getUser.getScreenName
 	val maxLength = 138-replyName.length
-      val candidatesFuture = getReplies(status, maxLength)
+	val twitter = new TwitterFactory().getInstance
+	val texts: Seq[String] = twitter.search(new Query("from:" + replyName))
+					.getTweets
+					.toSeq
+					.map{tweet => 
+						val StripLeadMentionRE(withoutMention) = tweet.getText
+						withoutMention
+					}				
+				
+	val topTfIdfTokens = getTopTfIdfTokens(texts, 5)
+	
+      val candidatesFuture = getReplies(status, topTfIdfTokens, maxLength)
       candidatesFuture.map { candidates =>
         val reply = "@" + replyName + " " + createTweetFromBigram(candidates, maxLength)
         log.info("Candidate reply: " + reply)
@@ -27,13 +40,52 @@ trait BaseReplier extends Actor with ActorLogging {
       } pipeTo sender
   }
 
-  def getReplies(status: Status, maxLength: Int): Future[Seq[String]]
+  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int): Future[Seq[String]]
+
+	def getTopTfIdfTokens(texts: Seq[String], maxNumTokens: Int = 5): Set[String] =
+	{
+		val countsPerText = texts.map { text => {
+      			SimpleTokenizer(text)
+        		.map(_.toLowerCase)
+			.filter(_.length > 2)
+			.filterNot(English.stopwords)
+			.counts
+    			}
+		}
+
+    		val totalCounts = countsPerText.foldLeft(Map[String, Int]()) {
+      			(dfs, tcounts) =>
+        			dfs ++ tcounts.map { 
+	  				case (k, v) => k -> (v + dfs.getOrElse(k, 0)) 
+				}
+    		}
+
+    		val docFreqs = countsPerText.foldLeft(Map[String, Int]()) { 
+      			(dfs, tcounts) =>
+        			dfs ++ tcounts.map { 
+	  				case (k, v) => k -> (1 + dfs.getOrElse(k, 0)) 
+				}
+      		}
+
+    		val tfidf = 
+      			for ((k,v) <- totalCounts) 
+			yield (k,v.toDouble/docFreqs(k))
+
+    		val topTfIdfTokens = tfidf
+      			.toSeq
+      			.sortBy(_._2)
+      			.takeRight(maxNumTokens)
+      			.map(_._1)
+      			.toSet
+
+		topTfIdfTokens
+	}
 
 	def createTweetFromBigram(tweets: Seq[String], maxLength: Int = 140): String =
 	{
 		val BEGIN_BOUNDARY = "[<b>]"
 		val END_BOUNDARY = "[<\\b>]"
-println(tweets.size)
+		//println(tweets.size)
 		val data = tweets.map(tweet => BEGIN_BOUNDARY + " " + Tokenize(tweet).mkString(" ") + " " + END_BOUNDARY)
 			.mkString(" ")
 
@@ -83,7 +135,7 @@ class SynonymReplier extends BaseReplier {
   import context.dispatcher
   import scala.concurrent.Future
 
-  def getReplies(status: Status, maxLength: Int = 140): Future[Seq[String]] = {
+  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to reply synonym")
     val text = stripLeadMention(status.getText).toLowerCase
     val synTexts = (0 until 100).map(_ => Future(synonymize(text))) 
@@ -110,7 +162,7 @@ class StreamReplier extends BaseReplier {
   /**
    * Produce a reply to a status.
    */
-  def getReplies(status: Status, maxLength: Int = 140): Future[Seq[String]] = {
+  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to reply stream")
 
     val text = stripLeadMention(status.getText).toLowerCase
@@ -174,7 +226,7 @@ class SynonymStreamReplier extends StreamReplier {
   override implicit val timeout = Timeout(10000)
 
 
-  override def getReplies(status: Status, maxLength: Int = 140): Future[Seq[String]] = {
+  override def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to do synonym search")
     val text = stripLeadMention(status.getText).toLowerCase
 
@@ -220,7 +272,7 @@ class BigramReplier extends BaseReplier {
    * Produce a reply to a status using bigrams
    */
   lazy val stopwords = tshrdlu.util.English.stopwords_bot
-  def getReplies(status: Status, maxLength: Int = 140): Future[Seq[String]] = {
+  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to reply stream")
 
     val text = stripLeadMention(status.getText).toLowerCase
@@ -288,19 +340,24 @@ class LuceneReplier extends BaseReplier {
   import tshrdlu.util.{English, Lucene, SimpleTokenizer}
 
   import context.dispatcher
-  import akka.pattern.ask
   import akka.util._
   import scala.concurrent.duration._
   import scala.concurrent.Future
 
-  def getReplies(status: Status, maxLength: Int = 140): Future[Seq[String]] = {
+  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to do search replies via Lucene")
     val text = status.getText.toLowerCase
 	  val StripLeadMentionRE(withoutMention) = text
-	  val query = SimpleTokenizer(withoutMention)
-	    .filter(_.length > 2)
-	    .toList
-	    .mkString(" ")
+	  val query = (topTfIdfTokens ++ (SimpleTokenizer(withoutMention)
+	    					.filter(_.length > 2)
+	    					.filterNot(English.stopwords)
+	    					.toSet
+					)
+			).mkString(" ")
+			.replaceAll("""[^a-zA-Z\s]""","")
+
+	//println(query)
+
       val replyLucene = Lucene.read(query)
     Future(replyLucene).map(_.filter(_.length <= maxLength))
   }

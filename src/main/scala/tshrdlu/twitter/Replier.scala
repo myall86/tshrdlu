@@ -17,18 +17,23 @@ trait BaseReplier extends Actor with ActorLogging {
   import collection.JavaConversions._
   import nak.util.CollectionUtil._
 
+	lazy val random = new scala.util.Random
+
   def receive = {
     case ReplyToStatus(status) => 
       val replyName = status.getUser.getScreenName
 	val maxLength = 138-replyName.length
 	val twitter = new TwitterFactory().getInstance
+
+	// Collect the 15 most recent tweets posted by the user named replyName
 	val texts: Seq[String] = twitter.search(new Query("from:" + replyName))
 					.getTweets
 					.toSeq
 					.map{tweet => 
 						val StripLeadMentionRE(withoutMention) = tweet.getText
 						withoutMention
-					}				
+					}
+					.filter(English.isEnglish)				
 				
 	val topTfIdfTokens = getTopTfIdfTokens(texts, 5)
 	
@@ -48,6 +53,7 @@ trait BaseReplier extends Actor with ActorLogging {
       			SimpleTokenizer(text)
         		.map(_.toLowerCase)
 			.filter(_.length > 2)
+			.filter(English.isSafe)
 			.filterNot(English.stopwords)
 			.counts
     			}
@@ -86,16 +92,26 @@ trait BaseReplier extends Actor with ActorLogging {
 		val BEGIN_BOUNDARY = "[<b>]"
 		val END_BOUNDARY = "[<\\b>]"
 		//println(tweets.size)
+
+		// Add BEGIN_BOUNDARY & END_BOUNDARY to each tweet
 		val data = tweets.map(tweet => BEGIN_BOUNDARY + " " + Tokenize(tweet).mkString(" ") + " " + END_BOUNDARY)
 			.mkString(" ")
 
+		// Construct the bigram model
 		val bigramProb: Map[String,Map[String,Double]] = 
       			LanguageModel.createBigramModel(data)
 
-		var text = ""
 		var bigramUsed = Set[String]()
-		var currentToken = BEGIN_BOUNDARY
+		val initialTokenMap = bigramProb(BEGIN_BOUNDARY)
+		val numInitialTokens = initialTokenMap.size
 
+		// Select randomly the first token for the response tweet from a list of words 
+		// following the BEGIN_BOUNDARY token in the constructed bigram model.
+		var currentToken = if(numInitialTokens > 0) initialTokenMap.toSeq(random.nextInt(numInitialTokens))._1
+				else END_BOUNDARY
+		var text = currentToken
+
+		// Iteratively choose the best unused next token to append into the response tweet
 		while(currentToken != END_BOUNDARY && text.length <= maxLength)
 		{
 			val candidates = bigramProb(currentToken)
@@ -115,7 +131,7 @@ trait BaseReplier extends Actor with ActorLogging {
 	def Tokenize(text: String): IndexedSeq[String] =
 	{
     		val starts = """(?:[#@])|\b(?:http)"""
-   		 text.replaceAll("""([\?!()\";\|\[\].,':])""", " $1 ")
+   		 text.replaceAll("""([\?!()\";\|\[\].,:])""", " $1 ")
     			.trim
     			.split("\\s+")
     			.toIndexedSeq
@@ -350,6 +366,7 @@ class LuceneReplier extends BaseReplier {
 	  val StripLeadMentionRE(withoutMention) = text
 	  val query = (topTfIdfTokens ++ (SimpleTokenizer(withoutMention)
 	    					.filter(_.length > 2)
+						.filter(English.isSafe)
 	    					.filterNot(English.stopwords)
 	    					.toSet
 					)

@@ -79,7 +79,7 @@ object English extends Language("eng") {
   def isEnglish(text: String) = {
     val words = SimpleTokenizer(removeNonLanguage(text).toLowerCase)
     val count = words.count(vocabulary) 
-    count > 1 && count.toDouble/words.length > .3
+    count > 1 && count.toDouble/words.length >= .5
   }
 
   def removeNonLanguage(text: String) =

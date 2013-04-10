@@ -91,7 +91,7 @@ trait BaseReplier extends Actor with ActorLogging {
 	{
 		val BEGIN_BOUNDARY = "[<b>]"
 		val END_BOUNDARY = "[<\\b>]"
-		//println(tweets.size)
+		println(tweets.size)
 
 		// Add BEGIN_BOUNDARY & END_BOUNDARY to each tweet
 		val data = tweets.map(tweet => BEGIN_BOUNDARY + " " + Tokenize(tweet).mkString(" ") + " " + END_BOUNDARY)

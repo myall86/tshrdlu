@@ -445,7 +445,8 @@ class LuceneReplier extends BaseReplier {
 			.replaceAll("""[^a-zA-Z\s]""","")
 
 	println("\n****************")
-	println("<Query> " + query)
+	println("<Top tf-idf tokens> " + topTfIdfTokens.mkString(" "))
+	println("\n<Query> " + query)
 
       val replyLucene = Lucene.read(query)
     Future(replyLucene).map(_.filter(_.length <= maxLength))

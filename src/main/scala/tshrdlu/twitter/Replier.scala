@@ -9,6 +9,7 @@ import twitter4j._
 trait BaseReplier extends Actor with ActorLogging {
   import Bot._
   import TwitterRegex._
+  import tshrdlu.simMetrics.TextSim
   import tshrdlu.util.{English, LanguageModel, SimpleTokenizer}
 
   import context.dispatcher
@@ -18,6 +19,8 @@ trait BaseReplier extends Actor with ActorLogging {
   import nak.util.CollectionUtil._
 
 	lazy val random = new scala.util.Random
+	lazy val BEGIN_BOUNDARY = "[<b>]"
+	lazy val END_BOUNDARY = "[<\\b>]"
 
   def receive = {
     case ReplyToStatus(status) => 
@@ -36,10 +39,49 @@ trait BaseReplier extends Actor with ActorLogging {
 					.filter(English.isEnglish)				
 				
 	val topTfIdfTokens = getTopTfIdfTokens(texts, 5)
+
+	val preContext = SimpleTokenizer(texts.mkString(" "))
+				.map(_.toLowerCase)
+				.filter(_.length > 2)
+				.distinct
+
+	val curContext = SimpleTokenizer(status.getText)
+				.map(_.toLowerCase)
+				.filter(_.length > 2)
+				.distinct
 	
       val candidatesFuture = getReplies(status, topTfIdfTokens, maxLength)
       candidatesFuture.map { candidates =>
-        val reply = "@" + replyName + " " + createTweetFromBigram(candidates, maxLength)
+	val bigramProb = createBigramModelFromTweets(candidates)
+
+	val bestTweetFromBigram = createBestTweetFromBigram(bigramProb, maxLength)
+	val randomTweetsFromBigram = 
+      			for (_ <- 1 to 200) 
+			yield createRandomTweetFromBigram(bigramProb, maxLength)
+
+	val candidateResponses = (bestTweetFromBigram +: randomTweetsFromBigram.toSeq)
+			.map { response =>
+				val responseTokens = SimpleTokenizer(response)
+							.map(_.toLowerCase)
+							.filter(_.length > 2)
+							.distinct
+
+				val score = (TextSim.LexicalOverlap(responseTokens, curContext) + 
+						TextSim.LexicalOverlap(responseTokens, preContext)
+					) / 2
+
+				(response, score)
+			}
+			.sortBy(-_._2)
+
+	println("********** Top 10 responses **********")
+	for(i <- 0 to 9) println(candidateResponses(i) + "\n")
+	//candidateResponses.foreach(response => println(response + "\n"))
+	println("*********** Best response **********")
+	println(candidateResponses(0) + "\n")
+	println("************************************")
+
+        val reply = "@" + replyName + " " + candidateResponses(0)._1
         log.info("Candidate reply: " + reply)
         new StatusUpdate(reply).inReplyToStatusId(status.getId)
       } pipeTo sender
@@ -87,20 +129,21 @@ trait BaseReplier extends Actor with ActorLogging {
 		topTfIdfTokens
 	}
 
-	def createTweetFromBigram(tweets: Seq[String], maxLength: Int = 140): String =
+	def createBigramModelFromTweets(tweets: Seq[String]): Map[String,Map[String,Double]] =
 	{
-		val BEGIN_BOUNDARY = "[<b>]"
-		val END_BOUNDARY = "[<\\b>]"
-		//println(tweets.size)
+		println("\nNumber of returned tweets: " + tweets.size + "\n")
 
 		// Add BEGIN_BOUNDARY & END_BOUNDARY to each tweet
 		val data = tweets.map(tweet => BEGIN_BOUNDARY + " " + Tokenize(tweet).mkString(" ") + " " + END_BOUNDARY)
-			.mkString(" ")
+				.mkString(" ")
 
 		// Construct the bigram model
-		val bigramProb: Map[String,Map[String,Double]] = 
-      			LanguageModel.createBigramModel(data)
+      		LanguageModel.createBigramModel(data)
 
+	}
+
+	def createBestTweetFromBigram(bigramProb: Map[String,Map[String,Double]], maxLength: Int = 140): String =
+	{
 		var bigramUsed = Set[String]()
 		val initialTokenMap = bigramProb(BEGIN_BOUNDARY)
 		val numInitialTokens = initialTokenMap.size
@@ -127,6 +170,34 @@ trait BaseReplier extends Actor with ActorLogging {
 		}
 		text.replaceAll("""\s([\?!()\";\|\[\].,':])\s""", "$1").take(maxLength)
 	}
+
+	def createRandomTweetFromBigram(bigramProb: Map[String,Map[String,Double]], maxLength: Int = 140): String =
+	{
+		val initialTokenMap = bigramProb(BEGIN_BOUNDARY)
+		val numInitialTokens = initialTokenMap.size
+
+		// Select randomly the first token for the response tweet from a list of words 
+		// following the BEGIN_BOUNDARY token in the constructed bigram model.
+		var currentToken = if(numInitialTokens > 0) initialTokenMap.toSeq(random.nextInt(numInitialTokens))._1
+				else END_BOUNDARY
+		var text = currentToken
+
+		// Iteratively choose the random next token to append into the response tweet
+		while(currentToken != END_BOUNDARY && text.length <= maxLength)
+		{
+			val candidates = bigramProb(currentToken)
+			val numNextTokens = candidates.size
+
+			val nextToken = if (numNextTokens > 0) candidates.toSeq(random.nextInt(numNextTokens))._1
+					else END_BOUNDARY
+
+
+			if (nextToken != END_BOUNDARY) text += " " + nextToken
+			currentToken = nextToken
+		}
+		text.replaceAll("""\s([\?!()\";\|\[\].,':])\s""", "$1").take(maxLength)
+	}
+
 
 	def Tokenize(text: String): IndexedSeq[String] =
 	{
@@ -373,7 +444,8 @@ class LuceneReplier extends BaseReplier {
 			).mkString(" ")
 			.replaceAll("""[^a-zA-Z\s]""","")
 
-	//println(query)
+	println("\n****************")
+	println("<Query> " + query)
 
       val replyLucene = Lucene.read(query)
     Future(replyLucene).map(_.filter(_.length <= maxLength))

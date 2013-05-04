@@ -15,7 +15,8 @@ resolvers += "Typesafe Repository" at "http://repo.typesafe.com/typesafe/release
 libraryDependencies ++= Seq(
   "org.twitter4j" % "twitter4j-core" % "3.0.3",
   "org.twitter4j" % "twitter4j-stream" % "3.0.3",
-  "org.scalanlp" % "nak" % "1.1.1",
+  "org.scalanlp" % "chalk" % "1.1.2",
+  "org.scalanlp" % "nak" % "1.1.2",
   "com.typesafe.akka" %% "akka-actor" % "2.1.2",
   "commons-codec" % "commons-codec" % "1.7",
   "org.apache.lucene" % "lucene-core" % "4.2.0",

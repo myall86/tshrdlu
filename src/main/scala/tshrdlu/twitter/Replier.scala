@@ -17,8 +17,10 @@ trait BaseReplier extends Actor with ActorLogging {
   import scala.concurrent.Future
   import akka.pattern.pipe
   import collection.JavaConversions._
+  import chalk.lang.eng.PorterStemmer
   import nak.util.CollectionUtil._
 
+	lazy val stemmer = new PorterStemmer
 	lazy val random = new scala.util.Random
 	lazy val BEGIN_BOUNDARY = "[<b>]"
 	lazy val END_BOUNDARY = "[<\\b>]"
@@ -40,7 +42,7 @@ trait BaseReplier extends Actor with ActorLogging {
 					}
 					.filter(English.isEnglish)				
 				
-	val topTfIdfTokens = getTopTfIdfTokens(texts, 5)
+	val topTokens = getTopTfTokens(texts, 5)
 /*
 	val preContext = SimpleTokenizer(texts.mkString(" "))
 				.map(_.toLowerCase)
@@ -59,14 +61,16 @@ trait BaseReplier extends Actor with ActorLogging {
 					}
 				}
 				.distinct
+				.map {case Token(token, tag) => Token(stemmer(token), tag)}
 
 	val curContext = POSTagger(status.getText.toLowerCase)
 				.filter {case Token(token, tag) => 
 					token.length > 1
 				}
 				.distinct
+				.map {case Token(token, tag) => Token(stemmer(token), tag)}
 		
-      val candidatesFuture = getReplies(status, topTfIdfTokens, maxLength)
+      val candidatesFuture = getReplies(status, topTokens, maxLength)
       candidatesFuture.map { candidates =>
 	val bigramProb = createBigramModelFromTweets(candidates)
 
@@ -83,6 +87,7 @@ trait BaseReplier extends Actor with ActorLogging {
 							}
 							.toSeq
 							.distinct
+							.map {case Token(token, tag) => Token(stemmer(token), tag)}
 		
 				val score = (TextSim.POSTokenOverlap(responseTokens, curContext) + 
 						TextSim.POSTokenOverlap(responseTokens, preContext)
@@ -115,7 +120,36 @@ POSTagger(candidateResponses(0)._1).foreach(println)
       } pipeTo sender
   }
 
-  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int): Future[Seq[String]]
+  def getReplies(status: Status, topTokens: Set[String], maxLength: Int): Future[Seq[String]]
+
+	def getTopTfTokens(texts: Seq[String], maxNumTokens: Int = 5): Set[String] =
+	{
+		val countsPerText = texts.map { text => {
+      			SimpleTokenizer(text)
+        		.map(_.toLowerCase)
+			.filter(_.length > 2)
+			.filter(English.isSafe)
+			.filterNot(English.stopwords)
+			.counts
+    			}
+		}
+
+    		val totalCounts = countsPerText.foldLeft(Map[String, Int]()) {
+      			(dfs, tcounts) =>
+        			dfs ++ tcounts.map { 
+	  				case (k, v) => k -> (v + dfs.getOrElse(k, 0)) 
+				}
+    		}
+
+    		val topTfTokens = totalCounts
+      			.toSeq
+      			.sortBy(_._2)
+      			.takeRight(maxNumTokens)
+      			.map(_._1)
+      			.toSet
+
+		topTfTokens
+	}
 
 	def getTopTfIdfTokens(texts: Seq[String], maxNumTokens: Int = 5): Set[String] =
 	{
@@ -250,7 +284,7 @@ class SynonymReplier extends BaseReplier {
   import context.dispatcher
   import scala.concurrent.Future
 
-  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
+  def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to reply synonym")
     val text = stripLeadMention(status.getText).toLowerCase
     val synTexts = (0 until 100).map(_ => Future(synonymize(text))) 
@@ -277,7 +311,7 @@ class StreamReplier extends BaseReplier {
   /**
    * Produce a reply to a status.
    */
-  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
+  def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to reply stream")
 
     val text = stripLeadMention(status.getText).toLowerCase
@@ -341,7 +375,7 @@ class SynonymStreamReplier extends StreamReplier {
   override implicit val timeout = Timeout(10000)
 
 
-  override def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
+  override def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to do synonym search")
     val text = stripLeadMention(status.getText).toLowerCase
 
@@ -387,7 +421,7 @@ class BigramReplier extends BaseReplier {
    * Produce a reply to a status using bigrams
    */
   lazy val stopwords = tshrdlu.util.English.stopwords_bot
-  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
+  def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to reply stream")
 
     val text = stripLeadMention(status.getText).toLowerCase
@@ -459,11 +493,11 @@ class LuceneReplier extends BaseReplier {
   import scala.concurrent.duration._
   import scala.concurrent.Future
 
-  def getReplies(status: Status, topTfIdfTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
+  def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to do search replies via Lucene")
     val text = status.getText.toLowerCase
 	  val StripLeadMentionRE(withoutMention) = text
-	  val query = (topTfIdfTokens ++ (SimpleTokenizer(withoutMention)
+	  val query = (topTokens ++ (SimpleTokenizer(withoutMention)
 	    					.filter(_.length > 2)
 						.filter(English.isSafe)
 	    					.filterNot(English.stopwords)
@@ -473,7 +507,7 @@ class LuceneReplier extends BaseReplier {
 			.replaceAll("""[^a-zA-Z\s]""","")
 
 	println("\n****************")
-	println("<Top tf-idf tokens> " + topTfIdfTokens.mkString(" "))
+	println("<Top previous tokens> " + topTokens.mkString(" "))
 	println("\n<Query> " + query)
 
       val replyLucene = Lucene.read(query)

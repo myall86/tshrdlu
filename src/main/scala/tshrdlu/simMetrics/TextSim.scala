@@ -1,6 +1,7 @@
 package tshrdlu.simMetrics
 
-import tshrdlu.util.SimpleTokenizer
+import tshrdlu.util.{POSTagger, SimpleTokenizer}
+import tshrdlu.util.POSTagger.Token
 
 object TextSim {
 
@@ -25,5 +26,13 @@ object TextSim {
 			.distinct
 
 		LexicalOverlap(dTokens1, dTokens2)
+	}
+
+	def POSTokenOverlap(dPOSTokens1: Seq[Token], dPOSTokens2: Seq[Token]): Double =
+	{
+		val numOverlapTokens = dPOSTokens1.filter(dPOSTokens2.contains)
+						.size
+
+		numOverlapTokens.toDouble / math.max(dPOSTokens1.size, dPOSTokens2.size)
 	}
 }

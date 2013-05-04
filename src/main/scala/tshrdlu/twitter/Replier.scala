@@ -10,7 +10,8 @@ trait BaseReplier extends Actor with ActorLogging {
   import Bot._
   import TwitterRegex._
   import tshrdlu.simMetrics.TextSim
-  import tshrdlu.util.{English, LanguageModel, SimpleTokenizer}
+  import tshrdlu.util.{English, LanguageModel, POSTagger, SimpleTokenizer}
+  import tshrdlu.util.POSTagger.Token
 
   import context.dispatcher
   import scala.concurrent.Future
@@ -27,9 +28,10 @@ trait BaseReplier extends Actor with ActorLogging {
       val replyName = status.getUser.getScreenName
 	val maxLength = 138-replyName.length
 	val twitter = new TwitterFactory().getInstance
+	val botName = twitter.getScreenName
 
-	// Collect the 15 most recent tweets posted by the user named replyName
-	val texts: Seq[String] = twitter.search(new Query("from:" + replyName))
+	// Collect the 15 most recent tweets sent to the Bot by the user named replyName
+	val texts: Seq[String] = twitter.search(new Query("@" + botName + " from:" + replyName))
 					.getTweets
 					.toSeq
 					.map{tweet => 
@@ -39,7 +41,7 @@ trait BaseReplier extends Actor with ActorLogging {
 					.filter(English.isEnglish)				
 				
 	val topTfIdfTokens = getTopTfIdfTokens(texts, 5)
-
+/*
 	val preContext = SimpleTokenizer(texts.mkString(" "))
 				.map(_.toLowerCase)
 				.filter(_.length > 2)
@@ -49,7 +51,21 @@ trait BaseReplier extends Actor with ActorLogging {
 				.map(_.toLowerCase)
 				.filter(_.length > 2)
 				.distinct
-	
+*/
+	val preContext = texts.flatMap { text =>
+				POSTagger(text.toLowerCase)
+					.filter {case Token(token, tag) => 
+						token.length > 1
+					}
+				}
+				.distinct
+
+	val curContext = POSTagger(status.getText.toLowerCase)
+				.filter {case Token(token, tag) => 
+					token.length > 1
+				}
+				.distinct
+		
       val candidatesFuture = getReplies(status, topTfIdfTokens, maxLength)
       candidatesFuture.map { candidates =>
 	val bigramProb = createBigramModelFromTweets(candidates)
@@ -61,6 +77,18 @@ trait BaseReplier extends Actor with ActorLogging {
 
 	val candidateResponses = (bestTweetFromBigram +: randomTweetsFromBigram.toSeq)
 			.map { response =>
+				val responseTokens = POSTagger(response.toLowerCase)
+							.filter {case Token(token, tag) => 
+								token.length > 1
+							}
+							.toSeq
+							.distinct
+		
+				val score = (TextSim.POSTokenOverlap(responseTokens, curContext) + 
+						TextSim.POSTokenOverlap(responseTokens, preContext)
+					) / 2
+
+/*
 				val responseTokens = SimpleTokenizer(response)
 							.map(_.toLowerCase)
 							.filter(_.length > 2)
@@ -69,7 +97,7 @@ trait BaseReplier extends Actor with ActorLogging {
 				val score = (TextSim.LexicalOverlap(responseTokens, curContext) + 
 						TextSim.LexicalOverlap(responseTokens, preContext)
 					) / 2
-
+*/
 				(response, score)
 			}
 			.sortBy(-_._2)
@@ -80,7 +108,7 @@ trait BaseReplier extends Actor with ActorLogging {
 	println("*********** Best response **********")
 	println(candidateResponses(0) + "\n")
 	println("************************************")
-
+POSTagger(candidateResponses(0)._1).foreach(println)
         val reply = "@" + replyName + " " + candidateResponses(0)._1
         log.info("Candidate reply: " + reply)
         new StatusUpdate(reply).inReplyToStatusId(status.getId)

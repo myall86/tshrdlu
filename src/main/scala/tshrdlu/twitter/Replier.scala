@@ -41,18 +41,10 @@ trait BaseReplier extends Actor with ActorLogging {
 					.map{tweet => stripLeadMention(tweet.getText)}
 					.filter(English.isEnglish)				
 				
+	// Top 5 tf tokens in previous context
 	val topTokens = getTopTfTokens(texts, 5)
-/*
-	val preContext = SimpleTokenizer(texts.mkString(" "))
-				.map(_.toLowerCase)
-				.filter(_.length > 2)
-				.distinct
 
-	val curContext = SimpleTokenizer(status.getText)
-				.map(_.toLowerCase)
-				.filter(_.length > 2)
-				.distinct
-*/
+	// The sequence of <word_form, POS> pairs in the previous context
 	val preContext = texts.flatMap { text =>
 				POSTagger(text.toLowerCase)
 					.filter {case Token(token, tag) => 
@@ -62,35 +54,93 @@ trait BaseReplier extends Actor with ActorLogging {
 				//.distinct
 				.map {case Token(token, tag) => Token(stemmer(token), tag)}
 
+	// The sequence of <word_form, POS> pairs in the current context
 	val curContext = POSTagger(status.getText.toLowerCase)
 				.filter {case Token(token, tag) => 
 					token.length > 1
 				}
 				//.distinct
 				.map {case Token(token, tag) => Token(stemmer(token), tag)}
-
+				
+	// The sequence of topics in the previous context
 	val preTopics = texts.flatMap {text => 
 					val words = SimpleTokenizer(text.toLowerCase).toSeq
 					words.flatMap(word => modeler.wordTopicsMap.get(word))
 						.flatten				
 				}
 
+	// The sequence of topics in the current context
 	val curTopics = SimpleTokenizer(status.getText.toLowerCase).toSeq
 				.flatMap(word => modeler.wordTopicsMap.get(word))
 				.flatten
 
-		
+	// Get retrieved tweets		
       val candidatesFuture = getReplies(status, topTokens, maxLength)
       candidatesFuture.map { candidates =>
+	// Build a bigram model from returned tweets
 	val bigramProb = createBigramModelFromTweets(candidates)
 
 	val bestTweetFromBigram = createBestTweetFromBigram(bigramProb, maxLength)
+
+	// Randomly sample 200 tweets from the bigram model
 	val randomTweetsFromBigram = 
       			for (_ <- 1 to 200) 
 			yield createRandomTweetFromBigram(bigramProb, maxLength)
 
-	val candidateResponses = ((bestTweetFromBigram +: randomTweetsFromBigram.toSeq) ++ candidates.take(100))
-			.map { response =>
+	// Rank response candidates
+	val responseCandidates = rankedResponses(
+					// Add top 100 retrieved tweets to response candidates 
+					((bestTweetFromBigram +: randomTweetsFromBigram.toSeq) ++ candidates.take(100)),
+					curContext,
+					preContext,
+					curTopics,
+					preTopics
+				)
+	
+	// Print out top 10 response candidates
+	println("********** Top 10 responses **********")
+	for(i <- 0 to 9) println(responseCandidates(i) + "\n")
+	
+	println("*********** Best response **********")
+	println(responseCandidates(0) + "\n")
+	println("************************************")
+
+        val reply = "@" + replyName + " " + responseCandidates(0)._1
+        log.info("Candidate reply: " + reply)
+        new StatusUpdate(reply).inReplyToStatusId(status.getId)
+      } pipeTo sender
+  }
+
+  /**
+   * Produce returned tweets from a status and a set of top tokens
+   * in previous context.
+   * @param status the status is sent to the Bot.
+   * @param topTokens the top tokens in previous context.
+   * @param maxLength the maximum length of each returned tweet.
+   * @return A sequence of returned tweets.
+   */
+  def getReplies(status: Status, topTokens: Set[String], maxLength: Int): Future[Seq[String]]
+
+	/**
+          * Ranking the response candidates.
+ 
+          * @param responseCandidate the response candidates.
+   	  * @param curContext the sequence of <word_form, POS> pairs in the current context. 
+   	  * @param preContext the sequence of <word_form, POS> pairs in the previous context. 
+   	  * @param curTopics the sequence of topics in the current context. 
+   	  * @param preTopics the sequence of topics in the previous context. 
+   	  * @return A sequence of <response, score> pairs is sorted by score in decending order.
+   	  */
+	def rankedResponses(
+		responseCandidate: Seq[String], 
+		curContext: Seq[Token],
+		preContext: Seq[Token],
+		curTopics: Seq[String],
+		preTopics: Seq[String]
+	): Seq[(String, Double)] =
+	{
+		lazy val modeler = new TopicModeler("topic-keys.txt")
+		responseCandidate.map { response =>
 				val responseTokens = POSTagger(response.toLowerCase)
 							.filter {case Token(token, tag) => 
 								token.length > 1
@@ -103,41 +153,24 @@ trait BaseReplier extends Actor with ActorLogging {
 							.flatMap(word => modeler.wordTopicsMap.get(word))
 							.flatten
 		
+				// The final score is the sum of individual scores
 				val score = TextSim.POSTokenOverlap(responseTokens, curContext) + 
 						TextSim.POSTokenOverlap(responseTokens, preContext) +
 						TextSim.TopicOverlap(responseTopics, curTopics) + 
 						TextSim.TopicOverlap(responseTopics, preTopics) 
 					
-
-/*
-				val responseTokens = SimpleTokenizer(response)
-							.map(_.toLowerCase)
-							.filter(_.length > 2)
-							.distinct
-
-				val score = (TextSim.LexicalOverlap(responseTokens, curContext) + 
-						TextSim.LexicalOverlap(responseTokens, preContext)
-					) / 2
-*/
 				(response, score)
 			}
 			.sortBy(-_._2)
+	}
 
-	println("********** Top 10 responses **********")
-	for(i <- 0 to 9) println(candidateResponses(i) + "\n")
-	//candidateResponses.foreach(response => println(response + "\n"))
-	println("*********** Best response **********")
-	println(candidateResponses(0) + "\n")
-	println("************************************")
-POSTagger(candidateResponses(0)._1).foreach(println)
-        val reply = "@" + replyName + " " + candidateResponses(0)._1
-        log.info("Candidate reply: " + reply)
-        new StatusUpdate(reply).inReplyToStatusId(status.getId)
-      } pipeTo sender
-  }
-
-  def getReplies(status: Status, topTokens: Set[String], maxLength: Int): Future[Seq[String]]
-
+	/**
+          * Computing the top tf tokens from a sequence of texts.
+ 
+          * @param texts the sequence of input texts.
+   	  * @param maxNumTokens the maximum number of returned top tokens. Default = 5. 
+   	  * @return A set of top tf tokens.
+   	  */
 	def getTopTfTokens(texts: Seq[String], maxNumTokens: Int = 5): Set[String] =
 	{
 		val countsPerText = texts.map { text => {
@@ -167,6 +200,13 @@ POSTagger(candidateResponses(0)._1).foreach(println)
 		topTfTokens
 	}
 
+	/**
+          * Computing the top tf-idf tokens from a sequence of texts.
+ 
+          * @param texts the sequence of input texts.
+   	  * @param maxNumTokens the maximum number of returned top tokens. Default = 5. 
+   	  * @return A set of top tf-idf tokens.
+   	  */
 	def getTopTfIdfTokens(texts: Seq[String], maxNumTokens: Int = 5): Set[String] =
 	{
 		val countsPerText = texts.map { text => {
@@ -220,17 +260,14 @@ POSTagger(candidateResponses(0)._1).foreach(println)
 
 	}
 
+	/**
+ 	 * Create the best tweet from a bigram model.
+ 	 */
 	def createBestTweetFromBigram(bigramProb: Map[String,Map[String,Double]], maxLength: Int = 140): String =
 	{
 		var bigramUsed = Set[String]()
-		val initialTokenMap = bigramProb(BEGIN_BOUNDARY)
-		val numInitialTokens = initialTokenMap.size
-
-		// Select randomly the first token for the response tweet from a list of words 
-		// following the BEGIN_BOUNDARY token in the constructed bigram model.
-		var currentToken = if(numInitialTokens > 0) initialTokenMap.toSeq(random.nextInt(numInitialTokens))._1
-				else END_BOUNDARY
-		var text = currentToken
+		var currentToken = BEGIN_BOUNDARY
+		var text = ""
 
 		// Iteratively choose the best unused next token to append into the response tweet
 		while(currentToken != END_BOUNDARY && text.length <= maxLength)
@@ -249,6 +286,9 @@ POSTagger(candidateResponses(0)._1).foreach(println)
 		text.replaceAll("""\s([\?!()\";\|\[\].,':])\s""", "$1").take(maxLength)
 	}
 
+	/**
+ 	 * Create a random tweet from a bigram model.
+ 	 */
 	def createRandomTweetFromBigram(bigramProb: Map[String,Map[String,Double]], maxLength: Int = 140): String =
 	{
 		val initialTokenMap = bigramProb(BEGIN_BOUNDARY)
@@ -286,26 +326,6 @@ POSTagger(candidateResponses(0)._1).foreach(println)
     			.toIndexedSeq
     			.filterNot(x => x.startsWith(starts))
   	}
-
-}
-
-/**
- * An actor that constructs replies to a given status.
- */
-class SynonymReplier extends BaseReplier {
-  import Bot._ 
-  import tshrdlu.util.English.synonymize
-  import TwitterRegex._
-
-  import context.dispatcher
-  import scala.concurrent.Future
-
-  def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
-    log.info("Trying to reply synonym")
-    val text = stripLeadMention(status.getText).toLowerCase
-    val synTexts = (0 until 100).map(_ => Future(synonymize(text))) 
-    Future.sequence(synTexts).map(_.filter(_.length <= maxLength))
-  }
 
 }
 
@@ -372,132 +392,9 @@ class StreamReplier extends BaseReplier {
 
 }
 
-
 /**
- * An actor that constructs replies to a given status based on synonyms.
- */
-class SynonymStreamReplier extends StreamReplier {
-  import Bot._
-  import tshrdlu.util.SimpleTokenizer
-
-  import context.dispatcher
-  import akka.pattern.ask
-  import akka.util._
-  import scala.concurrent.duration._
-  import scala.concurrent.Future
-
-  import tshrdlu.util.English._
-  import TwitterRegex._
-  override implicit val timeout = Timeout(10000)
-
-
-  override def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
-    log.info("Trying to do synonym search")
-    val text = stripLeadMention(status.getText).toLowerCase
-
-    // Get two words from the tweet, and get up to 5 synonyms each (including the word itself).
-    // Matched tweets must contain one synonym of each of the two words.
-
-    val query:String = SimpleTokenizer(text)
-      .filter(_.length > 3)
-      .filter(_.length < 10)
-      .filterNot(_.contains('/'))
-      .filter(tshrdlu.util.English.isSafe)
-      .filterNot(tshrdlu.util.English.stopwords(_))
-      .take(2).toList
-      .map(w => synonymize(w, 5))
-      .map(x=>x.mkString(" OR ")).map(x=>"("+x+")").mkString(" AND ")
-
-    log.info("searched for: " + query)
-
-    val futureStatuses = (context.parent ? SearchTwitter(new Query(query))).mapTo[Seq[Status]]
-
-    futureStatuses.map(_.flatMap(getText).filter(_.length <= maxLength))
- }
-
-}
-
-
-/**
- * An actor that constructs replies to a given status.
- */
-class BigramReplier extends BaseReplier {
-  import Bot._
-  import TwitterRegex._
-  import tshrdlu.util.SimpleTokenizer
-
-  import context.dispatcher
-  import akka.pattern.ask
-  import akka.util._
-  import scala.concurrent.duration._
-  import scala.concurrent.Future
-  implicit val timeout = Timeout(10 seconds)
-
-  /**
-   * Produce a reply to a status using bigrams
-   */
-  lazy val stopwords = tshrdlu.util.English.stopwords_bot
-  def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
-    log.info("Trying to reply stream")
-
-    val text = stripLeadMention(status.getText).toLowerCase
-    
-    // Get a sequence of futures of status sequences (one seq for each query)
-
-    val bigram = Tokenize(text)
-      .sliding(2)
-      .filterNot(z => (stopwords.contains(z(0))||stopwords.contains(z(1))))
-      .flatMap{case Vector(x,y) => List(x+" "+y)}
-      .toList
-      .sortBy(-_.length)
-
-    val statusSeqFutures: Seq[Future[Seq[String]]] = bigram
-      .takeRight(5)
-      .map(w => (context.parent ? SearchTwitter(new Query("\""+w+"\""))).mapTo[Seq[Status]].map(_.flatMap(getText).toSeq))
-    
-    //statusSeqFutures.foreach(println)
-    // Convert this to a Future of a single sequence of candidate replies
-    val statusesFuture: Future[Seq[String]] =
-      extractText(statusSeqFutures,bigram.toList)
-
-    //statusesFuture.foreach(println)
-    // Filter statuses to their text and make sure they are short enough to use.
-    statusesFuture.filter(_.length <= maxLength)
-  }
-
-  def extractText(statusList: Seq[Future[Seq[String]]],bigram:List[String]): Future[Seq[String]] = {
-    val bigramMap = Future.sequence(statusList).map(_.flatten)
-    //bigramMap.foreach(println)
-    val sortedMap = bigramMap.map { tweet => {
-      tweet.flatMap{ x => { 
-        Tokenize(x)
-          .sliding(2)
-          .filterNot(z => (stopwords.contains(z(0))||stopwords.contains(z(1))))
-          .map(bg => bg.mkString(" ") -> x) toMap
-      }}.filter { case (p,q) => bigram.contains(p)}
-    }}
-
-    val bigramSeq = sortedMap.map(_.map(_._2))
-    bigramSeq
-  }
-
-  def getText(status: Status): Option[String] = {
-    import tshrdlu.util.English.{isEnglish,isSafe}
-
-    val text = status.getText match {
-      case StripMentionsRE(rest) => rest
-      case x => x
-    }
-    
-    if (!text.contains('@') && !text.contains('/') && isEnglish(text) && isSafe(text))
-      Some(text)
-    else None
-  }
-
-}
-
-/**
- * An actor that constructs replies to a given status.
+ * An actor that constructs replies to a given status and a previous context
+ * using Lucene
  */
 class LuceneReplier extends BaseReplier {
   import Bot._
@@ -511,6 +408,14 @@ class LuceneReplier extends BaseReplier {
 
   lazy val modeler = new TopicModeler("topic-keys.txt")
 
+  /**
+   * Produce returned tweets from a status and a set of top tokens
+   * in previous context. Using a topic model to extend the query.
+   * @param status the status is sent to the Bot.
+   * @param topTokens the top tokens in previous context.
+   * @param maxLength the maximum length of each returned tweet. Default = 140.
+   * @return A sequence of returned tweets.
+   */
   def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to do search replies via Lucene")
     val text = status.getText.toLowerCase
@@ -524,11 +429,13 @@ class LuceneReplier extends BaseReplier {
 			).mkString(" ")
 			.replaceAll("""[^a-zA-Z\s]""","")
 
+	// Compute the topic list in contextString
 	val topicList = contextString.split(" ")
 				.toList
 				.flatMap(word => modeler.wordTopicsMap.get(word))
 				.flatten
 
+	// Select the first 3 topics, then pick 3 words from each topic
 	val topicWords:Set[String] = topicList.take(3)
 						.map(topic =>
 							modeler.topicWordsMap

@@ -1,7 +1,9 @@
 package tshrdlu.util
 
 
-
+/**
+ * A companion object to help assign POS tag for each word in a tweet.
+ */
 object POSTagger {
 	import cmu.arktweetnlp.Tagger
       	import cmu.arktweetnlp.Tagger._

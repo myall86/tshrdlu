@@ -67,9 +67,9 @@ class Bot extends Actor with ActorLogging {
   val replierManager = context.actorOf(Props[ReplierManager], name = "ReplierManager")
 
   val streamReplier = context.actorOf(Props[StreamReplier], name = "StreamReplier")
-  val synonymReplier = context.actorOf(Props[SynonymReplier], name = "SynonymReplier")
-  val synonymStreamReplier = context.actorOf(Props[SynonymStreamReplier], name = "SynonymStreamReplier")
-  val bigramReplier = context.actorOf(Props[BigramReplier], name = "BigramReplier")
+  //val synonymReplier = context.actorOf(Props[SynonymReplier], name = "SynonymReplier")
+  //val synonymStreamReplier = context.actorOf(Props[SynonymStreamReplier], name = "SynonymStreamReplier")
+  //val bigramReplier = context.actorOf(Props[BigramReplier], name = "BigramReplier")
   val luceneReplier = context.actorOf(Props[LuceneReplier], name = "LuceneReplier")
 
   override def preStart {
@@ -177,10 +177,12 @@ class ReplierManager extends Actor with ActorLogging {
 }
 
 
-// The Sampler collects possible responses. Does not implement a
-// filter for bot requests, so it should be connected to the sample
-// stream. Batches tweets together using the collector so we don't
-// need to add every tweet to the index on its own.
+/**
+ * The Sampler collects possible responses. Does not implement a
+ * filter for bot requests, so it should be connected to the sample stream.
+ * Batch tweets together using the collector so we don't
+ * need to add every tweet to the index on its own.
+ */
 class Sampler extends Actor with ActorLogging {
   import Bot._
 
@@ -201,9 +203,10 @@ class Sampler extends Actor with ActorLogging {
 }
 
 
-
-// Collects until it reaches 100 and then sends them back to the
-// sender and the cycle begins anew.
+/**
+ * Collects until it reaches 100 and then sends them back to 
+ * the sender and the cycle begins anew.
+ */
 class Collector extends Actor with ActorLogging {
 
   val collected = scala.collection.mutable.ListBuffer[Status]()
@@ -219,10 +222,11 @@ class Collector extends Actor with ActorLogging {
 }
 
 
-
-// The LuceneWriter actor extracts the content of each tweet, removes
-// the RT and mentions from the front and selects only tweets
-// classified as not vulgar for indexing via Lucene.
+/**
+ * The LuceneWriter actor extracts the content of each tweet,
+ * removes the RT and mentions from the front and selects only tweets
+ * classified as not vulgar for indexing via Lucene.
+ */
 class LuceneWriter extends Actor with ActorLogging {
 
   import tshrdlu.util.{English, Lucene}

@@ -2,8 +2,14 @@ package tshrdlu.util
 
 import collection.mutable.HashMap
 
+/**
+ * A companion object for constructing unigram and bigram language model.
+ */
 object LanguageModel {
 
+  /**
+   * Construct a unigram language model from text
+   */
   def createUnigramModel(text: String) = {
     val unigramCounts = HashMap[String,Double]().withDefaultValue(0.0)
     var numTokens = 1.0
@@ -19,6 +25,10 @@ object LanguageModel {
   }
 
   val BOUNDARY = "[###]"
+
+  /**
+   * Construct a bigram language model from text
+   */
   def createBigramModel(text: String) = {
     val unigramModel: Map[String,Double] = createUnigramModel(text)
 

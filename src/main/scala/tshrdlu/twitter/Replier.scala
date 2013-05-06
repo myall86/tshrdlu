@@ -32,14 +32,13 @@ trait BaseReplier extends Actor with ActorLogging {
 	val twitter = new TwitterFactory().getInstance
 	val botName = twitter.getScreenName
 
+	lazy val modeler = new TopicModeler("topic-keys.txt")
+
 	// Collect the 15 most recent tweets sent to the Bot by the user named replyName
 	val texts: Seq[String] = twitter.search(new Query("@" + botName + " from:" + replyName))
 					.getTweets
 					.toSeq
-					.map{tweet => 
-						val StripLeadMentionRE(withoutMention) = tweet.getText
-						withoutMention
-					}
+					.map{tweet => stripLeadMention(tweet.getText)}
 					.filter(English.isEnglish)				
 				
 	val topTokens = getTopTfTokens(texts, 5)
@@ -60,15 +59,26 @@ trait BaseReplier extends Actor with ActorLogging {
 						token.length > 1
 					}
 				}
-				.distinct
+				//.distinct
 				.map {case Token(token, tag) => Token(stemmer(token), tag)}
 
 	val curContext = POSTagger(status.getText.toLowerCase)
 				.filter {case Token(token, tag) => 
 					token.length > 1
 				}
-				.distinct
+				//.distinct
 				.map {case Token(token, tag) => Token(stemmer(token), tag)}
+
+	val preTopics = texts.flatMap {text => 
+					val words = SimpleTokenizer(text.toLowerCase).toSeq
+					words.flatMap(word => modeler.wordTopicsMap.get(word))
+						.flatten				
+				}
+
+	val curTopics = SimpleTokenizer(status.getText.toLowerCase).toSeq
+				.flatMap(word => modeler.wordTopicsMap.get(word))
+				.flatten
+
 		
       val candidatesFuture = getReplies(status, topTokens, maxLength)
       candidatesFuture.map { candidates =>
@@ -79,19 +89,25 @@ trait BaseReplier extends Actor with ActorLogging {
       			for (_ <- 1 to 200) 
 			yield createRandomTweetFromBigram(bigramProb, maxLength)
 
-	val candidateResponses = (bestTweetFromBigram +: randomTweetsFromBigram.toSeq)
+	val candidateResponses = ((bestTweetFromBigram +: randomTweetsFromBigram.toSeq) ++ candidates.take(100))
 			.map { response =>
 				val responseTokens = POSTagger(response.toLowerCase)
 							.filter {case Token(token, tag) => 
 								token.length > 1
 							}
 							.toSeq
-							.distinct
+							//.distinct
 							.map {case Token(token, tag) => Token(stemmer(token), tag)}
+
+				val responseTopics = SimpleTokenizer(response.toLowerCase).toSeq
+							.flatMap(word => modeler.wordTopicsMap.get(word))
+							.flatten
 		
-				val score = (TextSim.POSTokenOverlap(responseTokens, curContext) + 
-						TextSim.POSTokenOverlap(responseTokens, preContext)
-					) / 2
+				val score = TextSim.POSTokenOverlap(responseTokens, curContext) + 
+						TextSim.POSTokenOverlap(responseTokens, preContext) +
+						TextSim.TopicOverlap(responseTopics, curTopics) + 
+						TextSim.TopicOverlap(responseTopics, preTopics) 
+					
 
 /*
 				val responseTokens = SimpleTokenizer(response)
@@ -493,11 +509,13 @@ class LuceneReplier extends BaseReplier {
   import scala.concurrent.duration._
   import scala.concurrent.Future
 
+  lazy val modeler = new TopicModeler("topic-keys.txt")
+
   def getReplies(status: Status, topTokens: Set[String], maxLength: Int = 140): Future[Seq[String]] = {
     log.info("Trying to do search replies via Lucene")
     val text = status.getText.toLowerCase
 	  val StripLeadMentionRE(withoutMention) = text
-	  val query = (topTokens ++ (SimpleTokenizer(withoutMention)
+	  val contextString = (topTokens ++ (SimpleTokenizer(withoutMention)
 	    					.filter(_.length > 2)
 						.filter(English.isSafe)
 	    					.filterNot(English.stopwords)
@@ -505,6 +523,23 @@ class LuceneReplier extends BaseReplier {
 					)
 			).mkString(" ")
 			.replaceAll("""[^a-zA-Z\s]""","")
+
+	val topicList = contextString.split(" ")
+				.toList
+				.flatMap(word => modeler.wordTopicsMap.get(word))
+				.flatten
+
+	val topicWords:Set[String] = topicList.take(3)
+						.map(topic =>
+							modeler.topicWordsMap
+								.getOrElse(topic, Set(" "))
+								.filter(_.length > 2)
+								.take(3)
+						)
+						.flatten
+						.toSet
+
+	val query = (contextString.split(" ").toSet ++ topicWords).mkString(" ")
 
 	println("\n****************")
 	println("<Top previous tokens> " + topTokens.mkString(" "))

@@ -256,7 +256,7 @@ object TwitterRegex {
   lazy val StripLeadMentionRE = """(?:)^@[a-z_0-9]+\s(.*)$""".r
 
   // Pull the RT and mentions from the front of a tweet.
-  lazy val StripMentionsRE = """(?:)(?:RT\s)?(?:(?:@[A-Za-z]+\s))+(.*)$""".r   
+  lazy val StripMentionsRE = """(?:)(?:RT\s)?(?:(?:@[A-Za-z_0-9]+\s))+(.*)$""".r   
 
   def stripLeadMention(text: String) = text match {
     case StripLeadMentionRE(withoutMention) => withoutMention

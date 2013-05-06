@@ -5,27 +5,35 @@ import tshrdlu.util.POSTagger.Token
 
 object TextSim {
 
-	def LexicalOverlap(dTokens1: Seq[String], dTokens2: Seq[String]): Double =
+	def LexicalOverlap(tokens1: Seq[String], tokens2: Seq[String]): Double =
 	{
-		val numOverlapTokens = dTokens1.filter(dTokens2.contains)
+		val numOverlapTokens = tokens1.filter(tokens2.contains)
 						.size
 
-		numOverlapTokens.toDouble / math.max(dTokens1.size, dTokens2.size)
+		numOverlapTokens.toDouble / math.max(tokens1.size, tokens2.size)
 	}
 	
 	def LexicalOverlap(text1: String, text2: String): Double =
 	{
-		val dTokens1 = SimpleTokenizer(text1)
+		val tokens1 = SimpleTokenizer(text1)
 			.map(_.toLowerCase)
 			.filter(_.length > 2)
-			.distinct	
+			//.distinct	
 
-		val dTokens2 = SimpleTokenizer(text2)
+		val tokens2 = SimpleTokenizer(text2)
 			.map(_.toLowerCase)
 			.filter(_.length > 2)
-			.distinct
+			//.distinct
 
-		LexicalOverlap(dTokens1, dTokens2)
+		LexicalOverlap(tokens1, tokens2)
+	}
+
+	def TopicOverlap(topics1: Seq[String], topics2: Seq[String]): Double =
+	{
+		val numOverlapTopics = topics1.filter(topics2.contains)
+						.size
+
+		numOverlapTopics.toDouble / math.max(topics1.size, topics2.size)
 	}
 
 	def POSTokenOverlap(dPOSTokens1: Seq[Token], dPOSTokens2: Seq[Token]): Double =

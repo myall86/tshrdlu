@@ -429,13 +429,18 @@ class LuceneReplier extends BaseReplier {
 			).mkString(" ")
 			.replaceAll("""[^a-zA-Z\s]""","")
 
-	// Compute the topic list in contextString
+	// Compute the topic list in contextString and sort in descending order
+	// the number of times a topic is mentioned
 	val topicList = contextString.split(" ")
 				.toList
 				.flatMap(word => modeler.wordTopicsMap.get(word))
 				.flatten
+				.groupBy(topic => topic)
+				.toList
+				.sortBy(-_._2.size)
+				.map(x => x._1)
 
-	// Select the first 3 topics, then pick 3 words from each topic
+	// Select the top 3 dominant topics, then pick 3 words from each topic
 	val topicWords:Set[String] = topicList.take(3)
 						.map(topic =>
 							modeler.topicWordsMap

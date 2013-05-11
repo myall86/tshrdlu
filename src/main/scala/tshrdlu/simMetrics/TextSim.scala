@@ -16,7 +16,11 @@ object TextSim {
 		val numOverlapTokens = tokens1.filter(tokens2.contains)
 						.size
 
-		numOverlapTokens.toDouble / math.max(tokens1.size, tokens2.size)
+		val maxNumTokens = math.max(tokens1.size, tokens2.size)
+
+		if(maxNumTokens > 0)
+			numOverlapTokens.toDouble / maxNumTokens
+		else 0
 	}
 	
 	/**
@@ -45,7 +49,11 @@ object TextSim {
 		val numOverlapTopics = topics1.filter(topics2.contains)
 						.size
 
-		numOverlapTopics.toDouble / math.max(topics1.size, topics2.size)
+		val maxNumTopics = math.max(topics1.size, topics2.size)
+
+		if(maxNumTopics > 0)
+			numOverlapTopics.toDouble / maxNumTopics
+		else 0
 	}
 
 	/**
@@ -57,6 +65,10 @@ object TextSim {
 		val numOverlapTokens = dPOSTokens1.filter(dPOSTokens2.contains)
 						.size
 
-		numOverlapTokens.toDouble / math.max(dPOSTokens1.size, dPOSTokens2.size)
+		val maxNumTokens = math.max(dPOSTokens1.size, dPOSTokens2.size)
+
+		if(maxNumTokens > 0)
+			numOverlapTokens.toDouble / maxNumTokens
+		else 0
 	}
 }

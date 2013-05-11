@@ -137,9 +137,10 @@ trait BaseReplier extends Actor with ActorLogging {
 		preContext: Seq[Token],
 		curTopics: Seq[String],
 		preTopics: Seq[String]
-	): Seq[(String, Double)] =
+	)/*: Seq[(String, Double)]*/ =
 	{
 		lazy val modeler = new TopicModeler("topic-keys.txt")
+		val POSTokenWeight = 0.7
 		responseCandidate.map { response =>
 				val responseTokens = POSTagger(response.toLowerCase)
 							.filter {case Token(token, tag) => 
@@ -154,12 +155,17 @@ trait BaseReplier extends Actor with ActorLogging {
 							.flatten
 		
 				// The final score is the sum of individual scores
-				val score = TextSim.POSTokenOverlap(responseTokens, curContext) + 
-						TextSim.POSTokenOverlap(responseTokens, preContext) +
-						TextSim.TopicOverlap(responseTopics, curTopics) + 
-						TextSim.TopicOverlap(responseTopics, preTopics) 
+				val curPOSTokenSim = TextSim.POSTokenOverlap(responseTokens, curContext)
+				val prePOSTokenSim = TextSim.POSTokenOverlap(responseTokens, preContext) 
+				val curTopicSim = TextSim.TopicOverlap(responseTopics, curTopics)
+				val preTopicSim = TextSim.TopicOverlap(responseTopics, preTopics)
+
+				//println(curPOSTokenSim + " " + prePOSTokenSim + " " + curTopicSim + " " + preTopicSim)
+
+				val score = POSTokenWeight * (curPOSTokenSim + prePOSTokenSim) + 
+						(1 - POSTokenWeight) * (curTopicSim + preTopicSim)
 					
-				(response, score)
+				(response, score, curPOSTokenSim, prePOSTokenSim, curTopicSim, preTopicSim)
 			}
 			.sortBy(-_._2)
 	}

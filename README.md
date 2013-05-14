@@ -1,17 +1,23 @@
 # tshrdlu
 =======
 
-Author: **Jason Baldridge** (jasonbaldridge@gmail.com)
-
-This is a parent repository for [project](https://github.com/utcompling/applied-nlp/wiki/Course-Project) related code for [Applied NLP course](https://github.com/utcompling/applied-nlp/wiki) being taught by [Jason Baldridge](http://www.jasonbaldridge.com) at [UT Austin](http://www.utexas.edu). This involves creating applications that use Twitter streams and can take automated actions as Twitter users, using natural language processing and machine learning.
-
-The name "tshrdlu" comes from Twitter+[SHRDLU](http://en.wikipedia.org/wiki/SHRDLU).
-
-For more information, updates, etc., follow [@appliednlp](https://twitter.com/appliednlp) on Twitter. The [@tshrdlu](https://twitter.com/tshrdlu) account is now doing some tweeting of its own (by which I mean automated tweeting, based on the code in this repository).
+Author: **Cuong Chau** (ckcuong@cs.utexas.edu)
 
 ## Requirements
 
-* Version 1.6 of the Java 2 SDK (http://java.sun.com)
+* Java version 1.7.0_15 (http://java.sun.com)
+
+## Notifications
+
+It only takes a few seconds for the program to reply to user.
+
+When you start running the program, you should wait a few minutes (at least 5 minutes) before you begin chatting with the bot
+because the system needs to collect tweets for indexing into Lucene database.
+Of course, you can chat immediately if you want, but the responses often bad due to the small number of tweets in Lucene database
+(I ran the program two days before asking the evaluators begin chatting with my bot).
+
+If this is the first time you chat with the bot, its responses often bad in a first few tweets (around 10-15) due to lack of information. 
+So, it is better if you provide some information about you as well as the topics you wanna talk in a first few tweets. 
 
 ## Configuring your environment variables
 
@@ -63,9 +69,13 @@ Documentation for SBT is at <http://www.scala-sbt.org/>
 Note: if you have SBT already installed on your system, you can
 also just call it directly with "sbt" in `TSHRDLU_DIR`.
 
+## Running the system
+
+To run tshrdlu, type (in the `TSHRDLU_DIR` directory):
+
+	$ bin/tshrdlu bot
 
 # Questions or suggestions?
 
-Email Jason Baldridge: <jasonbaldridge@gmail.com>
+Email Cuong Chau: <ckcuong@cs.utexas.edu>
 
-Or, create an issue: <https://github.com/utcompling/tshrdlu/issues>

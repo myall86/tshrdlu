@@ -463,7 +463,8 @@ class LuceneReplier extends BaseReplier {
 	println("<Top previous tokens> " + topTokens.mkString(" "))
 	println("\n<Query> " + query)
 
-      val replyLucene = Lucene.read(query)
+      val replyLucene = if(query.trim != "") Lucene.read(query)
+			else Lucene.read("Something is wrong . There is some mistake .")
     Future(replyLucene).map(_.filter(_.length <= maxLength))
   }
 
